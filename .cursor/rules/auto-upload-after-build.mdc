@@ -1,0 +1,17 @@
+---
+description: 编译成功后自动检测 USB 串口并烧录 ESP32-C3 EnvMonitor 固件
+alwaysApply: true
+---
+
+# 编译后自动烧录
+
+对本项目执行 **生产固件**（`esp32-c3-envmonitor`）编译且 **SUCCESS** 后：
+
+1. 检测 USB 串口：`pio device list` 或 `/dev/cu.usbmodem*`
+2. **若发现设备** → 立即烧录：`pio run -e esp32-c3-envmonitor -t upload`
+3. **若未发现** → 仅报告编译成功
+
+## 注意
+
+- 用户明确「只编译不烧录」时跳过 upload
+- 引脚与接线见 [docs/wiring.md](../docs/wiring.md)
