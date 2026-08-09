@@ -1,6 +1,8 @@
 #include "cli/serial_cli.h"
 
 #include "config.h"
+#include "net/mqtt_telemetry.h"
+#include "net/wifi_manager.h"
 #include "storage/settings_store.h"
 
 void SerialCli::persistSettings_() {
@@ -83,6 +85,11 @@ void SerialCli::printHelp() const {
   Serial.println(F("  view status|chart        Switch TFT view"));
   Serial.println(F("  chart [3s|1m|5m|15m]     Set or cycle chart step"));
   Serial.println(F("  metric temp|hum|eco2     Chart metric"));
+  Serial.println(F("  wifi set <ssid> [pass]   Save Wi-Fi and connect"));
+  Serial.println(F("  wifi status|clear        Wi-Fi status / clear creds"));
+  Serial.println(F("  mqtt set <host> [port] [user] [pass]"));
+  Serial.println(F("  mqtt prefix|id|interval  MQTT config"));
+  Serial.println(F("  mqtt status              MQTT status (pass hidden)"));
   Serial.println(F("  save                     Save settings to NVS"));
   Serial.println(F("  load                     Reload settings from NVS"));
 }
@@ -138,6 +145,175 @@ void SerialCli::printStatus() const {
         break;
     }
   }
+  if (ctx_.wifi != nullptr) {
+    ctx_.wifi->printStatus();
+  }
+  if (ctx_.mqtt != nullptr) {
+    ctx_.mqtt->printStatus();
+  }
+}
+
+void SerialCli::handleWifi_(const String &args) {
+  if (ctx_.wifi == nullptr) {
+    Serial.println(F("WiFi unavailable."));
+    return;
+  }
+  String rest = args;
+  rest.trim();
+  if (rest.equalsIgnoreCase("status") || rest.length() == 0) {
+    ctx_.wifi->printStatus();
+    return;
+  }
+  if (rest.equalsIgnoreCase("clear")) {
+    ctx_.wifi->clearCredentials();
+    return;
+  }
+  if (rest.startsWith("set ")) {
+    String payload = rest.substring(4);
+    payload.trim();
+    if (payload.length() == 0) {
+      Serial.println(F("Usage: wifi set <ssid> [pass]"));
+      return;
+    }
+    const int sp = payload.indexOf(' ');
+    String ssid;
+    String pass;
+    if (sp < 0) {
+      ssid = payload;
+    } else {
+      ssid = payload.substring(0, sp);
+      pass = payload.substring(sp + 1);
+      pass.trim();
+      if (pass == "\"\"") {
+        pass = "";
+      }
+    }
+    if (ctx_.wifi->setCredentials(ssid.c_str(), pass.c_str())) {
+      Serial.println(F("WiFi credentials saved; connecting..."));
+    } else {
+      Serial.println(F("WiFi set failed."));
+    }
+    return;
+  }
+  Serial.println(F("Usage: wifi set <ssid> [pass] | wifi status | wifi clear"));
+}
+
+void SerialCli::handleMqtt_(const String &args) {
+  if (ctx_.mqtt == nullptr || ctx_.settings == nullptr) {
+    Serial.println(F("MQTT unavailable."));
+    return;
+  }
+  String rest = args;
+  rest.trim();
+  if (rest.equalsIgnoreCase("status") || rest.length() == 0) {
+    ctx_.mqtt->printStatus();
+    return;
+  }
+  if (rest.startsWith("interval ")) {
+    const int sec = rest.substring(9).toInt();
+    if (ctx_.mqtt->setIntervalSec(static_cast<uint16_t>(sec))) {
+      Serial.print(F("MQTT interval: "));
+      Serial.print(sec);
+      Serial.println(F("s"));
+    } else {
+      Serial.println(F("Usage: mqtt interval <5-300>"));
+    }
+    return;
+  }
+  if (rest.startsWith("prefix ")) {
+    MqttConfig cfg;
+    ctx_.settings->loadMqttConfig(cfg);
+    String prefix = rest.substring(7);
+    prefix.trim();
+    if (prefix.length() == 0 || prefix.length() >= static_cast<int>(sizeof(cfg.prefix))) {
+      Serial.println(F("Usage: mqtt prefix <prefix>"));
+      return;
+    }
+    strncpy(cfg.prefix, prefix.c_str(), sizeof(cfg.prefix) - 1);
+    cfg.prefix[sizeof(cfg.prefix) - 1] = '\0';
+    ctx_.mqtt->applyConfig(cfg);
+    Serial.println(F("MQTT prefix saved."));
+    return;
+  }
+  if (rest.startsWith("id ")) {
+    MqttConfig cfg;
+    ctx_.settings->loadMqttConfig(cfg);
+    String id = rest.substring(3);
+    id.trim();
+    if (id.length() >= static_cast<int>(sizeof(cfg.deviceId))) {
+      Serial.println(F("device id too long"));
+      return;
+    }
+    strncpy(cfg.deviceId, id.c_str(), sizeof(cfg.deviceId) - 1);
+    cfg.deviceId[sizeof(cfg.deviceId) - 1] = '\0';
+    ctx_.mqtt->applyConfig(cfg);
+    Serial.println(F("MQTT device id saved."));
+    return;
+  }
+  if (rest.startsWith("set ")) {
+    String payload = rest.substring(4);
+    payload.trim();
+    if (payload.length() == 0) {
+      Serial.println(F("Usage: mqtt set <host> [port] [user] [pass]"));
+      return;
+    }
+    MqttConfig cfg;
+    ctx_.settings->loadMqttConfig(cfg);
+
+    String token;
+    int idx = 0;
+    auto nextToken = [&](String &out) -> bool {
+      while (idx < static_cast<int>(payload.length()) && payload[idx] == ' ') {
+        ++idx;
+      }
+      if (idx >= static_cast<int>(payload.length())) {
+        return false;
+      }
+      const int start = idx;
+      while (idx < static_cast<int>(payload.length()) && payload[idx] != ' ') {
+        ++idx;
+      }
+      out = payload.substring(start, idx);
+      return true;
+    };
+
+    if (!nextToken(token)) {
+      Serial.println(F("Usage: mqtt set <host> [port] [user] [pass]"));
+      return;
+    }
+    strncpy(cfg.host, token.c_str(), sizeof(cfg.host) - 1);
+    cfg.host[sizeof(cfg.host) - 1] = '\0';
+
+    if (nextToken(token)) {
+      const int port = token.toInt();
+      if (port > 0 && port <= 65535) {
+        cfg.port = static_cast<uint16_t>(port);
+      } else {
+        // token was user, not port
+        strncpy(cfg.user, token.c_str(), sizeof(cfg.user) - 1);
+        cfg.user[sizeof(cfg.user) - 1] = '\0';
+        if (nextToken(token)) {
+          strncpy(cfg.pass, token.c_str(), sizeof(cfg.pass) - 1);
+          cfg.pass[sizeof(cfg.pass) - 1] = '\0';
+        }
+        ctx_.mqtt->applyConfig(cfg);
+        Serial.println(F("MQTT config saved."));
+        return;
+      }
+    }
+    if (nextToken(token)) {
+      strncpy(cfg.user, token.c_str(), sizeof(cfg.user) - 1);
+      cfg.user[sizeof(cfg.user) - 1] = '\0';
+    }
+    if (nextToken(token)) {
+      strncpy(cfg.pass, token.c_str(), sizeof(cfg.pass) - 1);
+      cfg.pass[sizeof(cfg.pass) - 1] = '\0';
+    }
+    ctx_.mqtt->applyConfig(cfg);
+    Serial.println(F("MQTT config saved."));
+    return;
+  }
+  Serial.println(F("Usage: mqtt set|status|prefix|id|interval"));
 }
 
 void SerialCli::processLine(const String &line) {
@@ -228,6 +404,20 @@ void SerialCli::processLine(const String &line) {
       return;
     }
     Serial.println(F("Usage: chart [3s|1m|5m|15m]"));
+    return;
+  }
+
+  if (trimmed.startsWith("wifi")) {
+    String args = trimmed.length() > 4 ? trimmed.substring(4) : String("");
+    args.trim();
+    handleWifi_(args);
+    return;
+  }
+
+  if (trimmed.startsWith("mqtt")) {
+    String args = trimmed.length() > 4 ? trimmed.substring(4) : String("");
+    args.trim();
+    handleMqtt_(args);
     return;
   }
 

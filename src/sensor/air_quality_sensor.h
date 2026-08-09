@@ -34,6 +34,14 @@ private:
   bool faultActive_ = false;
   uint8_t ens160Flags_ = 3;
 
+  // Hold last gas sample: ENS160 NEWDAT is ~1 Hz; missing a poll must not
+  // zero the UI or flip ens160Ready to "warming up".
+  bool hasGasSample_ = false;
+  uint16_t lastEco2Ppm_ = 0;
+  uint16_t lastTvocPpb_ = 0;
+  uint8_t lastAqiUba_ = 0;
+  uint32_t lastCompensationMs_ = 0;
+
   float tempBuf_[SENSOR_FILTER_SAMPLES] = {};
   float humBuf_[SENSOR_FILTER_SAMPLES] = {};
   float eco2Buf_[SENSOR_FILTER_SAMPLES] = {};

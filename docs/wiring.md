@@ -6,7 +6,7 @@
 |------|------|------|------|
 | 1 | ESP32-C3 Pro Mini | 1 | USB 供电 / 烧录 |
 | 2 | ENS160 + AHT20 模块 | 1 | I2C，常见地址 ENS160=0x53、AHT20=0x38 |
-| 3 | ILI9341 TFT 2.4 寸 | 1 | 320×240，4-wire SPI |
+| 3 | ST7789 TFT 1.47 寸 | 1 | 320×172，4-wire SPI |
 | 4 | 杜邦线 | 若干 | 3.3V 逻辑 |
 
 ## 引脚定义
@@ -19,8 +19,8 @@
 |------|------|------|
 | I2C SDA | 8 | ENS160 + AHT20 |
 | I2C SCL | 9 | 400 kHz |
-| SPI MOSI | 7 | ILI9341 SDI |
-| SPI SCK | 6 | ILI9341 SCK |
+| SPI MOSI | 7 | TFT SDI（ST7789） |
+| SPI SCK | 6 | TFT SCK |
 | TFT CS | 10 | 片选 |
 | TFT DC | 4 | 数据/命令 |
 | TFT RST | 5 | 复位 |
@@ -39,7 +39,9 @@
 - AHT20 地址 **0x38**
 - 两芯片共用一条 I2C 总线
 
-## ILI9341 TFT（SPI）
+## ST7789 TFT（SPI）
+
+1.47 寸 **320×172**（驱动 ST7789，BGR 色序）。引脚与接线同 4-wire SPI：
 
 | TFT | ESP32-C3 |
 |-----|----------|
@@ -52,6 +54,8 @@
 | SCK | GPIO 6 |
 | LED / BL | GPIO 3 |
 | MISO | 不接（4-wire SPI） |
+
+> 显示驱动使用 **TFT_eSPI**，引脚与分辨率配置在 [`include/boards/User_Setup_ST7789_172x320.h`](../include/boards/User_Setup_ST7789_172x320.h)（由 `platformio.ini` 的 `TFT_ESPI_USER_SETUP_PATH` 引入），改引脚时需同时改该文件。
 
 ## 电源
 

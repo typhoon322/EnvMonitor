@@ -5,6 +5,8 @@
 #include "config.h"
 #include "display/display_driver.h"
 #include "history/env_history.h"
+#include "net/mqtt_telemetry.h"
+#include "net/wifi_manager.h"
 #include "sensor/air_quality_sensor.h"
 #include "storage/settings_store.h"
 
@@ -13,6 +15,8 @@ DisplayDriver displayDriver;
 SerialCli serialCli;
 EnvHistory envHistory;
 SettingsStore settingsStore;
+WifiManager wifiManager;
+MqttTelemetry mqttTelemetry;
 
 AirQualityReading currentReading;
 DisplayView displayView = DisplayView::Status;
@@ -96,7 +100,6 @@ void setup() {
 
   Serial.print(F("Board: "));
   Serial.println(F(BOARD_NAME));
-
   envHistory.begin();
 
   if (!settingsStore.begin()) {
@@ -111,18 +114,22 @@ void setup() {
   systemContext.chartMetric = &chartMetric;
   systemContext.chartStep = &chartStep;
   systemContext.backlightLevel = &backlightLevel;
+  systemContext.wifi = &wifiManager;
+  systemContext.mqtt = &mqttTelemetry;
   serialCli.setContext(systemContext);
 
   if (settingsStore.load(systemContext)) {
     Serial.println(F("Settings loaded from NVS."));
   }
 
+  wifiManager.begin(&settingsStore);
+  mqttTelemetry.begin(&settingsStore, &wifiManager);
+
   if (!displayDriver.begin(backlightLevel)) {
     Serial.println(F("WARN: TFT init failed. Check SPI wiring."));
   } else {
     displayDriver.showSplash();
   }
-
   if (!airQualitySensor.begin()) {
     Serial.println(F("WARN: air quality sensor init failed. Check I2C wiring."));
   } else {
@@ -156,6 +163,9 @@ void loop() {
       tryRecoverSensor();
     }
   }
+
+  wifiManager.tick(now);
+  mqttTelemetry.tick(now, currentReading, airQualitySensor.stateText());
 
   if (now - lastChartSampleMs >= CHART_SAMPLE_MS) {
     lastChartSampleMs = now;

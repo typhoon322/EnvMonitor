@@ -3,12 +3,30 @@
 #include <Arduino.h>
 
 #include "cli/serial_cli.h"
+#include "config.h"
+
+struct MqttConfig {
+  char host[64] = "";
+  uint16_t port = MQTT_DEFAULT_PORT;
+  char user[32] = "";
+  char pass[64] = "";
+  char prefix[32] = MQTT_DEFAULT_PREFIX;
+  char deviceId[24] = "";  // empty => derive from MAC at runtime
+  uint16_t intervalSec = MQTT_DEFAULT_INTERVAL_SEC;
+};
 
 class SettingsStore {
 public:
   bool begin();
   bool load(SystemContext &ctx);
   bool save(const SystemContext &ctx);
+
+  void loadWifiCredentials(char *ssid, size_t ssidLen, char *pass, size_t passLen) const;
+  bool saveWifiCredentials(const char *ssid, const char *pass);
+  void clearWifiCredentials();
+
+  void loadMqttConfig(MqttConfig &cfg) const;
+  bool saveMqttConfig(const MqttConfig &cfg);
 
 private:
   static constexpr uint32_t kMagicV1 = 0x454E5631;  // "ENV1"

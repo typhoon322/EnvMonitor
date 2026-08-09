@@ -1,34 +1,37 @@
 #include "display/display_driver.h"
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_ILI9341.h>
-#include <SPI.h>
+#include <TFT_eSPI.h>
 #include <math.h>
 
 #include "config.h"
 
 namespace {
+// ST7789 1.47" panel used in landscape (rotation 1)
 constexpr int kScreenW = 320;
-constexpr int kScreenH = 240;
-constexpr int kChartTop = 36;
-constexpr int kChartBottom = 220;
+constexpr int kScreenH = 172;
+constexpr int kChartTop = 30;
+constexpr int kChartBottom = 164;
 constexpr int kChartLeft = 40;
-constexpr int kChartRight = 310;
+constexpr int kChartRight = 316;
 
-Adafruit_ILI9341 tft(PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
+TFT_eSPI tft;
 
 uint16_t color565(uint8_t r, uint8_t g, uint8_t b) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
-const uint16_t kBg = ILI9341_BLACK;
-const uint16_t kText = ILI9341_WHITE;
-const uint16_t kAccent = ILI9341_CYAN;
-const uint16_t kWarn = ILI9341_YELLOW;
-const uint16_t kBad = ILI9341_RED;
-const uint16_t kGood = ILI9341_GREEN;
-const uint16_t kChartLine = ILI9341_GREEN;
-const uint16_t kChartGrid = ILI9341_DARKGREY;
+const uint16_t kBg = TFT_BLACK;
+const uint16_t kText = TFT_WHITE;
+const uint16_t kAccent = TFT_CYAN;
+const uint16_t kWarn = TFT_YELLOW;
+const uint16_t kBad = TFT_RED;
+const uint16_t kGood = TFT_GREEN;
+const uint16_t kChartLine = TFT_GREEN;
+const uint16_t kChartGrid = TFT_DARKGREY;
+
+void clearField(int x, int y, int w, int h) {
+  tft.fillRect(x, y, w, h, kBg);
+}
 
 int valueToY(float value, float yMin, float yMax) {
   if (yMax <= yMin) {
@@ -109,19 +112,20 @@ uint16_t aqiColor(uint8_t aqi) {
 }  // namespace
 
 bool DisplayDriver::begin(uint8_t backlightLevel) {
-  pinMode(PIN_TFT_BL, OUTPUT);
-  setBacklight(backlightLevel);
-
-  SPI.begin(PIN_TFT_SCK, -1, PIN_TFT_MOSI, PIN_TFT_CS);
-  tft.begin();
-  tft.setRotation(1);
+  // TFT_eSPI reads pins + ST7789 config from the sketch-level tft_setup.h
+  // (auto-included); it initialises the SPI bus and display reset.
+  tft.init();
+  tft.setRotation(1);  // 320x172 landscape
   tft.fillScreen(kBg);
+  setBacklight(backlightLevel);
   initialized_ = true;
+  statusChromeDrawn_ = false;
   return true;
 }
 
 void DisplayDriver::setBacklight(uint8_t level) {
   backlightLevel_ = level;
+  pinMode(PIN_TFT_BL, OUTPUT);
   if (level == 0) {
     digitalWrite(PIN_TFT_BL, LOW);
   } else {
@@ -133,15 +137,34 @@ void DisplayDriver::showSplash() {
   if (!initialized_) {
     return;
   }
+  statusChromeDrawn_ = false;
   tft.fillScreen(kBg);
   tft.setTextColor(kAccent);
   tft.setTextSize(3);
-  tft.setCursor(40, 90);
+  tft.setCursor(52, 58);
   tft.print(F("EnvMonitor"));
   tft.setTextSize(2);
   tft.setTextColor(kText);
-  tft.setCursor(70, 130);
+  tft.setCursor(100, 98);
   tft.print(F("Starting..."));
+}
+
+void DisplayDriver::drawStatusChrome_() {
+  tft.fillScreen(kBg);
+
+  tft.setTextColor(kAccent);
+  tft.setTextSize(2);
+  tft.setCursor(8, 6);
+  tft.print(F("EnvMonitor"));
+
+  tft.setTextSize(2);
+  tft.setTextColor(kText);
+  tft.setCursor(8, 78);
+  tft.print(F("eCO2:"));
+  tft.setCursor(8, 100);
+  tft.print(F("TVOC:"));
+  tft.setCursor(8, 122);
+  tft.print(F("AQI:"));
 }
 
 void DisplayDriver::updateStatus(const AirQualityReading &reading, const char *sensorState) {
@@ -149,24 +172,27 @@ void DisplayDriver::updateStatus(const AirQualityReading &reading, const char *s
     return;
   }
 
-  tft.fillScreen(kBg);
-  tft.setTextColor(kAccent);
-  tft.setTextSize(2);
-  tft.setCursor(8, 8);
-  tft.print(F("EnvMonitor"));
+  if (!statusChromeDrawn_) {
+    drawStatusChrome_();
+    statusChromeDrawn_ = true;
+  }
 
+  // Sensor state (top-right)
+  clearField(200, 6, 112, 16);
   tft.setTextSize(1);
   tft.setTextColor(kText);
-  tft.setCursor(220, 12);
+  tft.setCursor(252, 12);
   if (sensorState != nullptr) {
     tft.print(sensorState);
   } else {
     tft.print(F("?"));
   }
 
+  // Temperature
+  clearField(8, 36, 120, 36);
   tft.setTextSize(4);
   tft.setTextColor(kGood);
-  tft.setCursor(8, 40);
+  tft.setCursor(8, 36);
   if (!isnan(reading.temperatureC)) {
     tft.print(reading.temperatureC, 1);
   } else {
@@ -175,9 +201,11 @@ void DisplayDriver::updateStatus(const AirQualityReading &reading, const char *s
   tft.setTextSize(2);
   tft.print(F(" C"));
 
+  // Humidity
+  clearField(140, 36, 172, 36);
   tft.setTextSize(3);
   tft.setTextColor(kAccent);
-  tft.setCursor(170, 48);
+  tft.setCursor(140, 42);
   if (!isnan(reading.humidityPct)) {
     tft.print(reading.humidityPct, 1);
   } else {
@@ -186,28 +214,33 @@ void DisplayDriver::updateStatus(const AirQualityReading &reading, const char *s
   tft.setTextSize(2);
   tft.print(F(" %RH"));
 
+  // eCO2 value
+  clearField(80, 78, 232, 20);
   tft.setTextSize(2);
-  tft.setTextColor(kText);
-  tft.setCursor(8, 110);
-  tft.print(F("eCO2: "));
   tft.setTextColor(kWarn);
+  tft.setCursor(80, 78);
   tft.print(reading.eco2Ppm);
   tft.setTextColor(kText);
   tft.print(F(" ppm"));
 
-  tft.setCursor(8, 140);
-  tft.print(F("TVOC: "));
+  // TVOC value
+  clearField(80, 100, 232, 20);
+  tft.setTextColor(kText);
+  tft.setCursor(80, 100);
   tft.print(reading.tvocPpb);
   tft.print(F(" ppb"));
 
-  tft.setCursor(8, 170);
-  tft.print(F("AQI: "));
+  // AQI value
+  clearField(80, 122, 232, 20);
   tft.setTextColor(aqiColor(reading.aqiUba));
+  tft.setCursor(80, 122);
   tft.print(reading.aqiUba);
   tft.setTextColor(kText);
   tft.print(F(" / 5"));
 
-  tft.setCursor(8, 210);
+  // Gas sensor footer
+  clearField(8, 146, 304, 20);
+  tft.setCursor(8, 146);
   if (reading.ens160Ready) {
     tft.setTextColor(kGood);
     tft.print(F("Gas sensor: operating"));
@@ -221,7 +254,7 @@ void DisplayDriver::drawChartBars_(const EnvChartBar *bars, size_t count, ChartM
   if (count == 0) {
     tft.setTextSize(2);
     tft.setTextColor(kText);
-    tft.setCursor(80, 120);
+    tft.setCursor(70, 74);
     tft.print(F("Collecting data..."));
     return;
   }
@@ -248,8 +281,7 @@ void DisplayDriver::drawChartBars_(const EnvChartBar *bars, size_t count, ChartM
     float low = 0.0f;
     float close = 0.0f;
     EnvHistory::barValues(bars[i], metric, high, low, close);
-    const int x =
-        kChartLeft + static_cast<int>((i * width) / (count > 1 ? count - 1 : 1));
+    const int x = kChartLeft + static_cast<int>((i * width) / (count > 1 ? count - 1 : 1));
     const int yClose = valueToY(close, yMin, yMax);
     const int yHi = valueToY(high, yMin, yMax);
     const int yLo = valueToY(low, yMin, yMax);
@@ -268,13 +300,15 @@ void DisplayDriver::updateChart(const EnvHistory &history, ChartMetric metric) {
     return;
   }
 
+  statusChromeDrawn_ = false;
+
   EnvChartBar bars[128];
   const size_t count = history.copyBars(bars, 128);
 
   tft.fillScreen(kBg);
   tft.setTextColor(kAccent);
   tft.setTextSize(2);
-  tft.setCursor(8, 8);
+  tft.setCursor(8, 6);
   tft.print(F("Chart "));
   tft.print(history.stepLabel());
   tft.print(F("  "));

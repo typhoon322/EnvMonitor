@@ -5,12 +5,13 @@
 | 能力 | 说明 |
 |------|------|
 | 环境监测 | AHT20 温湿度 + ENS160 eCO2/TVOC/AQI |
-| 本地 TFT | ILI9341 320×240 状态页 + 历史曲线 |
+| 本地 TFT | ST7789 1.47 寸 320×172 状态页 + 历史曲线 |
 | 串口 CLI | 115200，命令见 [protocol.md](protocol.md) |
 | 内存历史 | 3 s 基础采样，多档聚合步长 |
-| NVS | 视图、曲线步长、指标、背光 |
+| NVS | 视图、曲线步长、指标、背光、Wi‑Fi/MQTT |
+| MQTT 遥测 | Wi‑Fi STA + 周期 JSON 上报（见 [mqtt-telemetry.md](mqtt-telemetry.md)） |
 
-**未包含（后续 Phase）：** WiFi Web UI、OTA、USB Host 协议、LittleFS 历史落盘。
+**未包含（后续 Phase）：** Home Assistant Discovery、局域网 HTTP 状态页、OTA、USB Host 协议、LittleFS 历史落盘。
 
 ## ENS160 预热
 
@@ -57,11 +58,12 @@ TFT 状态页用颜色区分 AQI 等级。
 
 ## TFT 调试
 
-若屏幕空白或镜像：
+屏为 ST7789 **320×172**（TFT_eSPI 驱动，配置在 `include/boards/User_Setup_ST7789_172x320.h`）。若显示异常：
 
 - 检查 `PIN_TFT_BL` 与 SPI 接线
-- 修改 `display_driver.cpp` 中 `setRotation(0..3)`
-- 必要时 `tft.invertDisplay(true)`
+- 颜色反了：`display_driver.cpp` 的 `begin()` 中加 `tft.invertDisplay(true)`
+- 内容错位/偏出屏幕：检查 `User_Setup` 的 `CGRAM_OFFSET` 与 `TFT_WIDTH/HEIGHT`（172x320），旋转方向改 `setRotation(0..3)`
+- 花屏或闪烁：降低 `User_Setup` 中 `SPI_FREQUENCY`（如 16000000）
 
 ## 传感器恢复
 

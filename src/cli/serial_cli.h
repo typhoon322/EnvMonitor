@@ -7,6 +7,8 @@
 
 class EnvHistory;
 class SettingsStore;
+class WifiManager;
+class MqttTelemetry;
 
 struct SystemContext {
   AirQualitySensor *sensor = nullptr;
@@ -17,6 +19,8 @@ struct SystemContext {
   ChartMetric *chartMetric = nullptr;
   ChartStep *chartStep = nullptr;
   uint8_t *backlightLevel = nullptr;
+  WifiManager *wifi = nullptr;
+  MqttTelemetry *mqtt = nullptr;
 };
 
 class SerialCli {
@@ -35,4 +39,6 @@ private:
   void persistSettings_();
   bool parseChartStep_(const String &token, ChartStep &out) const;
   bool parseChartMetric_(const String &token, ChartMetric &out) const;
+  void handleWifi_(const String &args);
+  void handleMqtt_(const String &args);
 };

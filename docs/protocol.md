@@ -30,8 +30,18 @@
 | `chart` | 循环切换步长 3s → 1m → 5m → 15m |
 | `chart 3s\|1m\|5m\|15m` | 指定步长 |
 | `metric temp\|hum\|eco2` | 曲线 Y 轴指标 |
+| `wifi set <ssid> [pass]` | 保存 Wi‑Fi 并连接（开放网络可省略 pass） |
+| `wifi status` | Wi‑Fi 状态 |
+| `wifi clear` | 清除 Wi‑Fi 凭据 |
+| `mqtt set <host> [port] [user] [pass]` | MQTT Broker（默认端口 1883） |
+| `mqtt prefix <prefix>` | 主题前缀（默认 `envmonitor`） |
+| `mqtt id <device_id>` | 设备 ID（默认 MAC 后 6 位） |
+| `mqtt interval <sec>` | 上报间隔 5–300（默认 10） |
+| `mqtt status` | MQTT 状态（密码不回显） |
 | `save` | 保存 view/step/metric/backlight 到 NVS |
 | `load` | 从 NVS 加载设置 |
+
+Wi‑Fi / MQTT 凭据在对应 `set` 命令时立即写入 NVS。遥测说明见 [mqtt-telemetry.md](mqtt-telemetry.md)。
 
 命令不区分大小写。未知命令返回提示。
 
@@ -46,5 +56,8 @@ namespace: `envmon`
 | metric | temp / hum / eco2 |
 | cStep | 3s / 1m / 5m / 15m |
 | bl | 背光级别 |
+| wifiSsid / wifiPass | Wi‑Fi |
+| mqttHost / mqttPort / mqttUser / mqttPass | MQTT |
+| mqttPrefix / deviceId / mqttIntv | 主题前缀、设备 ID、上报间隔秒 |
 
-启动时自动 `load`；CLI 修改 view/chart/metric 时自动 `save`。
+启动时自动 `load` UI 设置；CLI 修改 view/chart/metric 时自动 `save`。

@@ -10,7 +10,7 @@
 |------|------|
 | MCU | ESP32-C3 Pro Mini |
 | 传感器 | ENS160 + AHT20 组合模块（I2C） |
-| 显示 | ILI9341 2.4 寸 320×240，4-wire SPI |
+| 显示 | ST7789 1.47 寸 320×172，4-wire SPI |
 
 详细接线见 [docs/wiring.md](docs/wiring.md)。硬件联调步骤见 [docs/hardware-checklist.md](docs/hardware-checklist.md)。
 

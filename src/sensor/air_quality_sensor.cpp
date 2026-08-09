@@ -16,6 +16,17 @@ bool AirQualitySensor::begin() {
   Wire.setClock(400000);
   Wire.setTimeout(50);
 
+  Serial.printf("[i2c] scan on SDA=%d SCL=%d:", PIN_I2C_SDA, PIN_I2C_SCL);
+  for (uint8_t addr = 1; addr < 127; ++addr) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf(" 0x%02X", addr);
+    }
+  }
+  Serial.println();
+
+  hasGasSample_ = false;
+  lastCompensationMs_ = 0;
   initialized_ = initDevices_();
   faultActive_ = !initialized_;
   filterIdx_ = 0;
@@ -79,20 +90,48 @@ bool AirQualitySensor::readAht20_(float &tempC, float &humPct) {
 }
 
 bool AirQualitySensor::readEns160_(AirQualityReading &out, float tempC, float humPct) {
-  ens160_.setTempCompensationCelsius(tempC);
-  ens160_.setRHCompensationFloat(humPct);
-
-  ens160Flags_ = ens160_.getFlags();
-  out.ens160Ready = (ens160Flags_ == 0);
-
-  if (!ens160_.checkDataStatus()) {
-    return false;
+  // Compensation writes are relatively slow I2C traffic; refresh ~10s instead of
+  // every sample so we are less likely to race the NEWDAT bit.
+  const uint32_t now = millis();
+  if (lastCompensationMs_ == 0 || (now - lastCompensationMs_) >= 10000) {
+    ens160_.setTempCompensationCelsius(tempC);
+    ens160_.setRHCompensationFloat(humPct);
+    lastCompensationMs_ = now;
   }
 
-  out.aqiUba = static_cast<uint8_t>(ens160_.getAQI());
-  out.tvocPpb = static_cast<uint16_t>(ens160_.getTVOC());
-  out.eco2Ppm = static_cast<uint16_t>(ens160_.getECO2());
-  return true;
+  ens160Flags_ = ens160_.getFlags();
+  // 0 = normal, 1 = warmup (~3 min), 2 = initial startup (~1 h once), 3 = invalid
+  out.ens160Ready = (ens160Flags_ == 0);
+
+  // NEWDAT is pulsed ~1 Hz. Retry briefly so a 1s sample interval does not miss it.
+  bool fresh = false;
+  for (int i = 0; i < 8; ++i) {
+    if (ens160_.checkDataStatus()) {
+      fresh = true;
+      break;
+    }
+    delay(25);
+  }
+
+  if (fresh) {
+    out.aqiUba = static_cast<uint8_t>(ens160_.getAQI());
+    out.tvocPpb = static_cast<uint16_t>(ens160_.getTVOC());
+    out.eco2Ppm = static_cast<uint16_t>(ens160_.getECO2());
+    lastAqiUba_ = out.aqiUba;
+    lastTvocPpb_ = out.tvocPpb;
+    lastEco2Ppm_ = out.eco2Ppm;
+    hasGasSample_ = true;
+    return true;
+  }
+
+  if (hasGasSample_) {
+    out.aqiUba = lastAqiUba_;
+    out.tvocPpb = lastTvocPpb_;
+    out.eco2Ppm = lastEco2Ppm_;
+    return true;
+  }
+
+  return false;
 }
 
 void AirQualitySensor::pushFilter_(float tempC, float humPct, uint16_t eco2, uint16_t tvoc,
@@ -146,10 +185,10 @@ bool AirQualitySensor::read(AirQualityReading &out) {
   raw.humidityPct = humPct;
   const bool ensOk = readEns160_(raw, tempC, humPct);
   if (!ensOk) {
+    // Keep flags-based ready state from readEns160_; only clear gas numbers.
     raw.eco2Ppm = 0;
     raw.tvocPpb = 0;
     raw.aqiUba = 0;
-    raw.ens160Ready = false;
   }
 
   pushFilter_(raw.temperatureC, raw.humidityPct, raw.eco2Ppm, raw.tvocPpb, raw.aqiUba);
@@ -216,6 +255,8 @@ bool AirQualitySensor::recover() {
   initialized_ = false;
   filterIdx_ = 0;
   filterCount_ = 0;
+  hasGasSample_ = false;
+  lastCompensationMs_ = 0;
   const bool ok = initDevices_();
   initialized_ = ok;
   faultActive_ = !ok;
