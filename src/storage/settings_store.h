@@ -4,6 +4,7 @@
 
 #include "cli/serial_cli.h"
 #include "config.h"
+#include "deepseek/deepseek_types.h"
 
 struct MqttConfig {
   char host[64] = "";
@@ -27,6 +28,12 @@ public:
 
   void loadMqttConfig(MqttConfig &cfg) const;
   bool saveMqttConfig(const MqttConfig &cfg);
+
+  void loadDeepSeekConfig(DeepSeekConfig &cfg) const;
+  bool saveDeepSeekConfig(const DeepSeekConfig &cfg);
+
+  void loadDeepSeekBalances(DeepSeekBalanceEntry *entries, uint8_t maxCount) const;
+  bool saveDeepSeekBalances(const DeepSeekBalanceEntry *entries, uint8_t count);
 
 private:
   static constexpr uint32_t kMagicV1 = 0x454E5631;  // "ENV1"

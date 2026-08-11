@@ -301,6 +301,7 @@ void DisplayDriver::updateChart(const EnvHistory &history, ChartMetric metric) {
   }
 
   statusChromeDrawn_ = false;
+  deepSeekChromeDrawn_ = false;
 
   EnvChartBar bars[128];
   const size_t count = history.copyBars(bars, 128);
@@ -315,4 +316,117 @@ void DisplayDriver::updateChart(const EnvHistory &history, ChartMetric metric) {
   tft.print(metricLabel(metric));
 
   drawChartBars_(bars, count, metric);
+}
+
+void DisplayDriver::drawDeepSeekChrome_() {
+  tft.fillScreen(kBg);
+  deepSeekChromeDrawn_ = true;
+  statusChromeDrawn_ = false;
+
+  tft.setTextColor(kAccent);
+  tft.setTextSize(2);
+  tft.setCursor(8, 6);
+  tft.print(F("DeepSeek"));
+}
+
+void DisplayDriver::updateDeepSeek(const DeepSeekBalanceEntry *entries, size_t count,
+                                   bool wifiConnected, bool refreshing, uint32_t lastRefreshMs,
+                                   uint16_t intervalSec) {
+  if (!initialized_) {
+    return;
+  }
+
+  if (!deepSeekChromeDrawn_) {
+    drawDeepSeekChrome_();
+  }
+
+  // Wi-Fi indicator (top-right)
+  clearField(220, 6, 92, 16);
+  tft.setTextSize(1);
+  tft.setTextColor(wifiConnected ? kGood : kBad);
+  tft.setCursor(228, 12);
+  tft.print(wifiConnected ? F("WiFi OK") : F("No WiFi"));
+
+  if (count == 0) {
+    clearField(8, 40, 304, 100);
+    tft.setTextSize(2);
+    tft.setTextColor(kWarn);
+    tft.setCursor(8, 48);
+    tft.println(F("No API Key"));
+    tft.setTextSize(1);
+    tft.setTextColor(kText);
+    tft.setCursor(8, 78);
+    tft.println(F("Configure via WebUI or:"));
+    tft.setCursor(8, 92);
+    tft.println(F("ds add <name> <key>"));
+    tft.setCursor(8, 110);
+    tft.println(F("AP: EnvMonitor"));
+    tft.setCursor(8, 124);
+    tft.println(F("open http://192.168.4.1"));
+    return;
+  }
+
+  constexpr int kRowTop = 34;
+  constexpr int kRowH = 28;
+  for (size_t i = 0; i < DEEPSEEK_MAX_KEYS; ++i) {
+    const int y = kRowTop + static_cast<int>(i) * kRowH;
+    clearField(8, y, 304, kRowH - 2);
+
+    if (i >= count) {
+      continue;
+    }
+
+    const DeepSeekBalanceEntry &entry = entries[i];
+    tft.setTextSize(2);
+    tft.setTextColor(kAccent);
+    tft.setCursor(8, y + 2);
+    tft.print(entry.name);
+
+    tft.setTextSize(1);
+    if (!entry.valid && entry.error[0] != '\0') {
+      tft.setTextColor(kBad);
+      tft.setCursor(8, y + 18);
+      tft.print(entry.error);
+      continue;
+    }
+
+    if (!entry.valid) {
+      tft.setTextColor(kWarn);
+      tft.setCursor(8, y + 18);
+      tft.print(refreshing ? F("Fetching...") : F("Pending..."));
+      continue;
+    }
+
+    tft.setTextColor(kText);
+    tft.setCursor(120, y + 6);
+    tft.print(entry.currency);
+    tft.print(F(" "));
+    tft.setTextSize(2);
+    tft.setTextColor(entry.isAvailable ? kGood : kWarn);
+    tft.print(entry.totalBalance);
+
+    tft.setTextSize(1);
+    tft.setTextColor(kText);
+    tft.setCursor(250, y + 10);
+    tft.print(entry.isAvailable ? F("OK") : F("N/A"));
+  }
+
+  clearField(8, 150, 304, 18);
+  tft.setTextSize(1);
+  tft.setTextColor(kText);
+  tft.setCursor(8, 154);
+  if (refreshing) {
+    tft.print(F("Updating..."));
+  } else if (lastRefreshMs > 0) {
+    const uint32_t ageSec = (millis() - lastRefreshMs) / 1000UL;
+    tft.print(F("Updated "));
+    tft.print(ageSec);
+    tft.print(F("s ago  every "));
+    tft.print(intervalSec);
+    tft.print(F("s"));
+  } else if (wifiConnected) {
+    tft.print(F("Waiting for first fetch..."));
+  } else {
+    tft.print(F("Connect WiFi to fetch balance"));
+  }
 }

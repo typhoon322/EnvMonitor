@@ -68,6 +68,15 @@ src/
   storage/                 # NVS 设置
 ```
 
+## 板载 SoftAP + WebUI
+
+热点固定 SSID `EnvMonitor` / 密码 `envmonitor`，浏览器打开 `http://192.168.4.1`（或内网 IP）可配置 WiFi / MQTT / DeepSeek，并查看环境数据。TFT 可用 GPIO2 按键循环切换 status / chart / DeepSeek 视图。
+
+## 可选：电脑端 DeepSeek 余额看板
+
+与 ESP32 固件解耦，可单独部署（见 [deepseek-usage/README.md](deepseek-usage/README.md)）。板子本身已支持 DeepSeek 余额展示。
+
 ## 后续扩展（未实现）
 
-- WiFi Web UI、OTA、Host 协议（可参考 TempControl 的 `web/`、`ota/`、`host/` 模块）
+- Home Assistant MQTT Discovery
+- OTA、Host 协议（可参考 TempControl）

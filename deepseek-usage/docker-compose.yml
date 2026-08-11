@@ -1,0 +1,17 @@
+services:
+  deepseek-usage:
+    build: .
+    container_name: deepseek-usage
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-8787}:8787"
+    environment:
+      MASTER_KEY: ${MASTER_KEY}
+      HOST: 0.0.0.0
+      PORT: 8787
+      DATA_DIR: /data
+      REFRESH_INTERVAL_SEC: ${REFRESH_INTERVAL_SEC:-300}
+    volumes:
+      - ./data:/data

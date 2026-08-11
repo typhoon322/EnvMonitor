@@ -3,6 +3,7 @@
 #include <Preferences.h>
 
 #include "config.h"
+#include "deepseek/deepseek_types.h"
 
 namespace {
 Preferences prefs;
@@ -34,8 +35,13 @@ bool SettingsStore::load(SystemContext &ctx) {
 
   if (ctx.displayView != nullptr) {
     const uint8_t view = prefs.getUChar("view", static_cast<uint8_t>(DisplayView::Status));
-    *ctx.displayView = view == static_cast<uint8_t>(DisplayView::Chart) ? DisplayView::Chart
-                                                                        : DisplayView::Status;
+    if (view == static_cast<uint8_t>(DisplayView::Chart)) {
+      *ctx.displayView = DisplayView::Chart;
+    } else if (view == static_cast<uint8_t>(DisplayView::DeepSeek)) {
+      *ctx.displayView = DisplayView::DeepSeek;
+    } else {
+      *ctx.displayView = DisplayView::Status;
+    }
   }
 
   if (ctx.chartMetric != nullptr) {
@@ -155,5 +161,129 @@ bool SettingsStore::saveMqttConfig(const MqttConfig &cfg) {
   prefs.putString("mqttPrefix", cfg.prefix[0] != '\0' ? cfg.prefix : MQTT_DEFAULT_PREFIX);
   prefs.putString("deviceId", cfg.deviceId);
   prefs.putUShort("mqttIntv", cfg.intervalSec);
+  return true;
+}
+
+void SettingsStore::loadDeepSeekConfig(DeepSeekConfig &cfg) const {
+  cfg = DeepSeekConfig{};
+  if (!opened_) {
+    return;
+  }
+
+  cfg.keyCount = prefs.getUChar("dsCount", 0);
+  if (cfg.keyCount > DEEPSEEK_MAX_KEYS) {
+    cfg.keyCount = DEEPSEEK_MAX_KEYS;
+  }
+
+  for (uint8_t i = 0; i < cfg.keyCount; ++i) {
+    char nameKey[12];
+    char apiKeyKey[12];
+    snprintf(nameKey, sizeof(nameKey), "dsN%u", i);
+    snprintf(apiKeyKey, sizeof(apiKeyKey), "dsK%u", i);
+    copyPrefString(cfg.keys[i].name, sizeof(cfg.keys[i].name), nameKey, "");
+    copyPrefString(cfg.keys[i].apiKey, sizeof(cfg.keys[i].apiKey), apiKeyKey, "");
+  }
+
+  cfg.intervalSec =
+      static_cast<uint16_t>(prefs.getUShort("dsIntv", DEEPSEEK_DEFAULT_INTERVAL_SEC));
+  if (cfg.intervalSec < DEEPSEEK_INTERVAL_MIN_SEC) {
+    cfg.intervalSec = DEEPSEEK_INTERVAL_MIN_SEC;
+  }
+  if (cfg.intervalSec > DEEPSEEK_INTERVAL_MAX_SEC) {
+    cfg.intervalSec = DEEPSEEK_INTERVAL_MAX_SEC;
+  }
+}
+
+bool SettingsStore::saveDeepSeekConfig(const DeepSeekConfig &cfg) {
+  if (!opened_) {
+    return false;
+  }
+
+  uint8_t count = cfg.keyCount;
+  if (count > DEEPSEEK_MAX_KEYS) {
+    count = DEEPSEEK_MAX_KEYS;
+  }
+  prefs.putUChar("dsCount", count);
+
+  for (uint8_t i = 0; i < count; ++i) {
+    char nameKey[12];
+    char apiKeyKey[12];
+    snprintf(nameKey, sizeof(nameKey), "dsN%u", i);
+    snprintf(apiKeyKey, sizeof(apiKeyKey), "dsK%u", i);
+    prefs.putString(nameKey, cfg.keys[i].name);
+    prefs.putString(apiKeyKey, cfg.keys[i].apiKey);
+  }
+
+  for (uint8_t i = count; i < DEEPSEEK_MAX_KEYS; ++i) {
+    char nameKey[12];
+    char apiKeyKey[12];
+    snprintf(nameKey, sizeof(nameKey), "dsN%u", i);
+    snprintf(apiKeyKey, sizeof(apiKeyKey), "dsK%u", i);
+    prefs.remove(nameKey);
+    prefs.remove(apiKeyKey);
+  }
+
+  prefs.putUShort("dsIntv", cfg.intervalSec);
+  return true;
+}
+
+void SettingsStore::loadDeepSeekBalances(DeepSeekBalanceEntry *entries, uint8_t maxCount) const {
+  if (entries == nullptr || maxCount == 0 || !opened_) {
+    return;
+  }
+  const uint8_t count = maxCount > DEEPSEEK_MAX_KEYS ? DEEPSEEK_MAX_KEYS : maxCount;
+  for (uint8_t i = 0; i < count; ++i) {
+    char key[12];
+    snprintf(key, sizeof(key), "dsBv%u", i);
+    if (!prefs.getBool(key, false)) {
+      continue;
+    }
+    entries[i].valid = true;
+    entries[i].configured = true;
+    snprintf(key, sizeof(key), "dsBa%u", i);
+    entries[i].isAvailable = prefs.getBool(key, false);
+    snprintf(key, sizeof(key), "dsBc%u", i);
+    copyPrefString(entries[i].currency, sizeof(entries[i].currency), key, "CNY");
+    snprintf(key, sizeof(key), "dsBt%u", i);
+    copyPrefString(entries[i].totalBalance, sizeof(entries[i].totalBalance), key, "0");
+    snprintf(key, sizeof(key), "dsBg%u", i);
+    copyPrefString(entries[i].grantedBalance, sizeof(entries[i].grantedBalance), key, "0");
+    snprintf(key, sizeof(key), "dsBu%u", i);
+    copyPrefString(entries[i].toppedUpBalance, sizeof(entries[i].toppedUpBalance), key, "0");
+    entries[i].error[0] = '\0';
+    entries[i].fetchedAtMs = 0;
+  }
+}
+
+bool SettingsStore::saveDeepSeekBalances(const DeepSeekBalanceEntry *entries, uint8_t count) {
+  if (entries == nullptr || !opened_) {
+    return false;
+  }
+  if (count > DEEPSEEK_MAX_KEYS) {
+    count = DEEPSEEK_MAX_KEYS;
+  }
+  for (uint8_t i = 0; i < count; ++i) {
+    char key[12];
+    snprintf(key, sizeof(key), "dsBv%u", i);
+    prefs.putBool(key, entries[i].valid);
+    if (!entries[i].valid) {
+      continue;
+    }
+    snprintf(key, sizeof(key), "dsBa%u", i);
+    prefs.putBool(key, entries[i].isAvailable);
+    snprintf(key, sizeof(key), "dsBc%u", i);
+    prefs.putString(key, entries[i].currency);
+    snprintf(key, sizeof(key), "dsBt%u", i);
+    prefs.putString(key, entries[i].totalBalance);
+    snprintf(key, sizeof(key), "dsBg%u", i);
+    prefs.putString(key, entries[i].grantedBalance);
+    snprintf(key, sizeof(key), "dsBu%u", i);
+    prefs.putString(key, entries[i].toppedUpBalance);
+  }
+  for (uint8_t i = count; i < DEEPSEEK_MAX_KEYS; ++i) {
+    char key[12];
+    snprintf(key, sizeof(key), "dsBv%u", i);
+    prefs.putBool(key, false);
+  }
   return true;
 }

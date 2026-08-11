@@ -25,6 +25,7 @@
 | TFT DC | 4 | 数据/命令 |
 | TFT RST | 5 | 复位 |
 | TFT BL | 3 | 背光（高电平亮） |
+| 视图按键 OUT | 2 | 三脚模块 VCC/GND/OUT，按下高电平 |
 
 ## ENS160 + AHT20（I2C）
 

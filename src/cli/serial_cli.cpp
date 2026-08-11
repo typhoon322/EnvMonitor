@@ -1,6 +1,7 @@
 #include "cli/serial_cli.h"
 
 #include "config.h"
+#include "net/deepseek_monitor.h"
 #include "net/mqtt_telemetry.h"
 #include "net/wifi_manager.h"
 #include "storage/settings_store.h"
@@ -82,14 +83,18 @@ void SerialCli::printHelp() const {
   Serial.println(F("Commands:"));
   Serial.println(F("  help                     Show this list"));
   Serial.println(F("  status                   Full sensor reading"));
-  Serial.println(F("  view status|chart        Switch TFT view"));
+  Serial.println(F("  view status|chart|ds     Switch TFT view"));
   Serial.println(F("  chart [3s|1m|5m|15m]     Set or cycle chart step"));
   Serial.println(F("  metric temp|hum|eco2     Chart metric"));
   Serial.println(F("  wifi set <ssid> [pass]   Save Wi-Fi and connect"));
   Serial.println(F("  wifi status|clear        Wi-Fi status / clear creds"));
   Serial.println(F("  mqtt set <host> [port] [user] [pass]"));
   Serial.println(F("  mqtt prefix|id|interval  MQTT config"));
-  Serial.println(F("  mqtt status              MQTT status (pass hidden)"));
+  Serial.println(F("  ds add <name> <api_key>  Add DeepSeek API key"));
+  Serial.println(F("  ds list|del|refresh        Manage keys / fetch now"));
+  Serial.println(F("  ds interval <30-3600>      Balance refresh seconds"));
+  Serial.println(F("  ds status                  DeepSeek balance status"));
+  Serial.println(F("  WebUI: http://<sta-ip> or AP 192.168.4.1"));
   Serial.println(F("  save                     Save settings to NVS"));
   Serial.println(F("  load                     Reload settings from NVS"));
 }
@@ -124,7 +129,13 @@ void SerialCli::printStatus() const {
   }
   if (ctx_.displayView != nullptr) {
     Serial.print(F("View: "));
-    Serial.println(*ctx_.displayView == DisplayView::Chart ? F("chart") : F("status"));
+    if (*ctx_.displayView == DisplayView::Chart) {
+      Serial.println(F("chart"));
+    } else if (*ctx_.displayView == DisplayView::DeepSeek) {
+      Serial.println(F("deepseek"));
+    } else {
+      Serial.println(F("status"));
+    }
   }
   if (ctx_.chartStep != nullptr && ctx_.history != nullptr) {
     Serial.print(F("Chart step: "));
@@ -150,6 +161,9 @@ void SerialCli::printStatus() const {
   }
   if (ctx_.mqtt != nullptr) {
     ctx_.mqtt->printStatus();
+  }
+  if (ctx_.deepseek != nullptr) {
+    ctx_.deepseek->printStatus();
   }
 }
 
@@ -316,6 +330,77 @@ void SerialCli::handleMqtt_(const String &args) {
   Serial.println(F("Usage: mqtt set|status|prefix|id|interval"));
 }
 
+void SerialCli::handleDeepSeek_(const String &args) {
+  if (ctx_.deepseek == nullptr) {
+    Serial.println(F("DeepSeek unavailable."));
+    return;
+  }
+
+  String rest = args;
+  rest.trim();
+  if (rest.equalsIgnoreCase("status") || rest.length() == 0) {
+    ctx_.deepseek->printStatus();
+    return;
+  }
+  if (rest.equalsIgnoreCase("list")) {
+    ctx_.deepseek->listKeys();
+    return;
+  }
+  if (rest.equalsIgnoreCase("refresh")) {
+    ctx_.deepseek->requestRefresh();
+    Serial.println(F("DeepSeek refresh queued."));
+    return;
+  }
+  if (rest.startsWith("interval ")) {
+    const int sec = rest.substring(9).toInt();
+    if (ctx_.deepseek->setIntervalSec(static_cast<uint16_t>(sec))) {
+      Serial.print(F("DeepSeek interval: "));
+      Serial.print(sec);
+      Serial.println(F("s"));
+    } else {
+      Serial.println(F("Usage: ds interval <30-3600>"));
+    }
+    return;
+  }
+  if (rest.startsWith("del ")) {
+    String target = rest.substring(4);
+    target.trim();
+    if (target.length() == 0) {
+      Serial.println(F("Usage: ds del <name|index>"));
+      return;
+    }
+    if (ctx_.deepseek->removeKey(target.c_str())) {
+      Serial.println(F("DeepSeek key removed."));
+    } else {
+      Serial.println(F("Key not found."));
+    }
+    return;
+  }
+  if (rest.startsWith("add ")) {
+    String payload = rest.substring(4);
+    payload.trim();
+    const int sp = payload.indexOf(' ');
+    if (sp < 0) {
+      Serial.println(F("Usage: ds add <name> <api_key>"));
+      return;
+    }
+    String name = payload.substring(0, sp);
+    String apiKey = payload.substring(sp + 1);
+    apiKey.trim();
+    if (name.length() == 0 || apiKey.length() == 0) {
+      Serial.println(F("Usage: ds add <name> <api_key>"));
+      return;
+    }
+    if (ctx_.deepseek->addKey(name.c_str(), apiKey.c_str())) {
+      Serial.println(F("DeepSeek key saved."));
+    } else {
+      Serial.println(F("Failed to add key (max 4 keys)."));
+    }
+    return;
+  }
+  Serial.println(F("Usage: ds add|list|del|refresh|interval|status"));
+}
+
 void SerialCli::processLine(const String &line) {
   String trimmed = line;
   trimmed.trim();
@@ -364,7 +449,14 @@ void SerialCli::processLine(const String &line) {
       Serial.println(F("View: chart"));
       return;
     }
-    Serial.println(F("Usage: view status|chart"));
+    if ((arg.equalsIgnoreCase("ds") || arg.equalsIgnoreCase("deepseek")) &&
+        ctx_.displayView != nullptr) {
+      *ctx_.displayView = DisplayView::DeepSeek;
+      persistSettings_();
+      Serial.println(F("View: deepseek"));
+      return;
+    }
+    Serial.println(F("Usage: view status|chart|ds"));
     return;
   }
 
@@ -418,6 +510,13 @@ void SerialCli::processLine(const String &line) {
     String args = trimmed.length() > 4 ? trimmed.substring(4) : String("");
     args.trim();
     handleMqtt_(args);
+    return;
+  }
+
+  if (trimmed.startsWith("ds")) {
+    String args = trimmed.length() > 2 ? trimmed.substring(2) : String("");
+    args.trim();
+    handleDeepSeek_(args);
     return;
   }
 

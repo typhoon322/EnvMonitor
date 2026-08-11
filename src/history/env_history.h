@@ -23,7 +23,7 @@ enum class ChartStep : uint8_t {
   Count
 };
 
-enum class DisplayView : uint8_t { Status = 0, Chart };
+enum class DisplayView : uint8_t { Status = 0, Chart, DeepSeek };
 
 enum class ChartMetric : uint8_t { Temperature = 0, Humidity, Eco2, Count };
 

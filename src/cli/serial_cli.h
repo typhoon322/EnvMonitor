@@ -9,6 +9,7 @@ class EnvHistory;
 class SettingsStore;
 class WifiManager;
 class MqttTelemetry;
+class DeepSeekMonitor;
 
 struct SystemContext {
   AirQualitySensor *sensor = nullptr;
@@ -21,6 +22,7 @@ struct SystemContext {
   uint8_t *backlightLevel = nullptr;
   WifiManager *wifi = nullptr;
   MqttTelemetry *mqtt = nullptr;
+  DeepSeekMonitor *deepseek = nullptr;
 };
 
 class SerialCli {
@@ -41,4 +43,5 @@ private:
   bool parseChartMetric_(const String &token, ChartMetric &out) const;
   void handleWifi_(const String &args);
   void handleMqtt_(const String &args);
+  void handleDeepSeek_(const String &args);
 };

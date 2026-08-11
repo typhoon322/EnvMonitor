@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeepSeek 用量监控</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <h1>DeepSeek 用量监控</h1>
+        <p class="subtitle">多 Key 余额与可用性看板（独立部署模块）</p>
+      </div>
+      <div class="header-actions">
+        <span id="refreshHint" class="hint"></span>
+        <button id="refreshAllBtn" class="btn primary">刷新全部</button>
+      </div>
+    </header>
+
+    <section class="panel">
+      <h2>添加 API Key</h2>
+      <form id="addKeyForm" class="form-grid">
+        <label>
+          名称
+          <input type="text" id="addName" placeholder="例如：个人账号" required maxlength="64">
+        </label>
+        <label>
+          API Key
+          <input type="password" id="addKey" placeholder="sk-..." required minlength="8">
+        </label>
+        <button type="submit" class="btn primary">添加</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Key 列表</h2>
+        <span id="keyCount" class="badge">0</span>
+      </div>
+      <div id="cards" class="cards"></div>
+      <p id="emptyState" class="empty hidden">暂无 Key，请在上方添加。</p>
+    </section>
+  </div>
+
+  <dialog id="editDialog">
+    <form method="dialog" id="editForm" class="dialog-form">
+      <h3>编辑 Key</h3>
+      <input type="hidden" id="editId">
+      <label>
+        名称
+        <input type="text" id="editName" required maxlength="64">
+      </label>
+      <label>
+        新 API Key（留空则不修改）
+        <input type="password" id="editKey" placeholder="sk-..." minlength="8">
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="cancelEdit" class="btn">取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

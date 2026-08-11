@@ -8,10 +8,12 @@
 | 本地 TFT | ST7789 1.47 寸 320×172 状态页 + 历史曲线 |
 | 串口 CLI | 115200，命令见 [protocol.md](protocol.md) |
 | 内存历史 | 3 s 基础采样，多档聚合步长 |
-| NVS | 视图、曲线步长、指标、背光、Wi‑Fi/MQTT |
+| NVS | 视图、曲线、背光、Wi‑Fi/MQTT、DeepSeek Key 与余额缓存 |
 | MQTT 遥测 | Wi‑Fi STA + 周期 JSON 上报（见 [mqtt-telemetry.md](mqtt-telemetry.md)） |
+| SoftAP + WebUI | 未联网开 AP；浏览器配置与看环境数据（见 specs） |
+| DeepSeek 余额 | 仅 TFT `view ds` 时自动拉余额（默认 3 分钟），NVS 持久化 |
 
-**未包含（后续 Phase）：** Home Assistant Discovery、局域网 HTTP 状态页、OTA、USB Host 协议、LittleFS 历史落盘。
+**未包含（后续 Phase）：** Home Assistant Discovery、OTA、USB Host 协议、LittleFS 历史落盘。
 
 ## ENS160 预热
 

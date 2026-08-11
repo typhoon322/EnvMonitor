@@ -5,7 +5,9 @@
 #include "config.h"
 #include "display/display_driver.h"
 #include "history/env_history.h"
+#include "net/deepseek_monitor.h"
 #include "net/mqtt_telemetry.h"
+#include "net/web_ui.h"
 #include "net/wifi_manager.h"
 #include "sensor/air_quality_sensor.h"
 #include "storage/settings_store.h"
@@ -17,6 +19,8 @@ EnvHistory envHistory;
 SettingsStore settingsStore;
 WifiManager wifiManager;
 MqttTelemetry mqttTelemetry;
+DeepSeekMonitor deepSeekMonitor;
+WebUi webUi;
 
 AirQualityReading currentReading;
 DisplayView displayView = DisplayView::Status;
@@ -31,7 +35,67 @@ uint32_t lastChartSampleMs = 0;
 uint8_t consecutiveBadReads = 0;
 uint32_t lastSensorRecoverMs = 0;
 
+bool viewBtnStablePressed_ = false;
+bool viewBtnLastRaw_ = false;
+uint32_t viewBtnLastChangeMs_ = 0;
+
 SystemContext systemContext;
+
+void refreshDisplay();
+
+bool readViewButtonPressed_() {
+  const int level = digitalRead(PIN_VIEW_BTN);
+#if VIEW_BTN_ACTIVE_HIGH
+  return level == HIGH;
+#else
+  return level == LOW;
+#endif
+}
+
+void cycleDisplayView_() {
+  switch (displayView) {
+    case DisplayView::Status:
+      displayView = DisplayView::Chart;
+      break;
+    case DisplayView::Chart:
+      displayView = DisplayView::DeepSeek;
+      break;
+    case DisplayView::DeepSeek:
+    default:
+      displayView = DisplayView::Status;
+      break;
+  }
+  settingsStore.save(systemContext);
+  lastDisplayMs = 0;
+  Serial.print(F("View button -> "));
+  if (displayView == DisplayView::Chart) {
+    Serial.println(F("chart"));
+  } else if (displayView == DisplayView::DeepSeek) {
+    Serial.println(F("deepseek"));
+  } else {
+    Serial.println(F("status"));
+  }
+  refreshDisplay();
+}
+
+void pollViewButton_(uint32_t nowMs) {
+  const bool rawPressed = readViewButtonPressed_();
+  if (rawPressed != viewBtnLastRaw_) {
+    viewBtnLastRaw_ = rawPressed;
+    viewBtnLastChangeMs_ = nowMs;
+    return;
+  }
+  if (nowMs - viewBtnLastChangeMs_ < VIEW_BTN_DEBOUNCE_MS) {
+    return;
+  }
+  if (rawPressed == viewBtnStablePressed_) {
+    return;
+  }
+  viewBtnStablePressed_ = rawPressed;
+  if (viewBtnStablePressed_) {
+    cycleDisplayView_();
+  }
+}
 
 void warmupSensor() {
   for (int i = 0; i < 5; ++i) {
@@ -86,13 +150,25 @@ void printStatusLine() {
 void refreshDisplay() {
   if (displayView == DisplayView::Chart) {
     displayDriver.updateChart(envHistory, chartMetric);
+  } else if (displayView == DisplayView::DeepSeek) {
+    DeepSeekBalanceEntry entries[DEEPSEEK_MAX_KEYS] = {};
+    const uint8_t count = deepSeekMonitor.keyCount();
+    for (uint8_t i = 0; i < count && i < DEEPSEEK_MAX_KEYS; ++i) {
+      const DeepSeekBalanceEntry *entry = deepSeekMonitor.balanceAt(i);
+      if (entry != nullptr) {
+        entries[i] = *entry;
+      }
+    }
+    displayDriver.updateDeepSeek(entries, count, wifiManager.isConnected(),
+                                 deepSeekMonitor.isRefreshing(), deepSeekMonitor.lastRefreshMs(),
+                                 deepSeekMonitor.intervalSec());
   } else {
     displayDriver.updateStatus(currentReading, airQualitySensor.stateText());
   }
 }
 
 void setup() {
-  esp_task_wdt_init(10, true);
+  esp_task_wdt_init(20, true);
   esp_task_wdt_add(NULL);
 
   serialCli.begin(115200);
@@ -100,6 +176,12 @@ void setup() {
 
   Serial.print(F("Board: "));
   Serial.println(F(BOARD_NAME));
+  pinMode(PIN_VIEW_BTN, INPUT);
+  viewBtnLastRaw_ = readViewButtonPressed_();
+  viewBtnStablePressed_ = viewBtnLastRaw_;
+  viewBtnLastChangeMs_ = millis();
+  Serial.print(F("View button on GPIO "));
+  Serial.println(PIN_VIEW_BTN);
   envHistory.begin();
 
   if (!settingsStore.begin()) {
@@ -116,6 +198,7 @@ void setup() {
   systemContext.backlightLevel = &backlightLevel;
   systemContext.wifi = &wifiManager;
   systemContext.mqtt = &mqttTelemetry;
+  systemContext.deepseek = &deepSeekMonitor;
   serialCli.setContext(systemContext);
 
   if (settingsStore.load(systemContext)) {
@@ -124,6 +207,17 @@ void setup() {
 
   wifiManager.begin(&settingsStore);
   mqttTelemetry.begin(&settingsStore, &wifiManager);
+  deepSeekMonitor.begin(&settingsStore, &wifiManager);
+
+  WebUiContext webCtx;
+  webCtx.settings = &settingsStore;
+  webCtx.wifi = &wifiManager;
+  webCtx.mqtt = &mqttTelemetry;
+  webCtx.deepseek = &deepSeekMonitor;
+  webCtx.sensor = &airQualitySensor;
+  webCtx.reading = &currentReading;
+  webCtx.displayView = &displayView;
+  webUi.begin(webCtx);
 
   if (!displayDriver.begin(backlightLevel)) {
     Serial.println(F("WARN: TFT init failed. Check SPI wiring."));
@@ -151,6 +245,7 @@ void loop() {
   serialCli.poll();
 
   const uint32_t now = millis();
+  pollViewButton_(now);
 
   if (now - lastSampleMs >= SAMPLE_INTERVAL_MS) {
     lastSampleMs = now;
@@ -166,6 +261,8 @@ void loop() {
 
   wifiManager.tick(now);
   mqttTelemetry.tick(now, currentReading, airQualitySensor.stateText());
+  deepSeekMonitor.tick(now, displayView == DisplayView::DeepSeek);
+  webUi.tick();
 
   if (now - lastChartSampleMs >= CHART_SAMPLE_MS) {
     lastChartSampleMs = now;

@@ -15,10 +15,29 @@ void copyString(char *dest, size_t destLen, const char *src) {
 }
 }  // namespace
 
+void WifiManager::ensureAp_() {
+  if (apActive_) {
+    return;
+  }
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.setSleep(false);
+  if (!WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASSWORD)) {
+    Serial.println(F("WiFi AP start failed."));
+    return;
+  }
+  apActive_ = true;
+  Serial.print(F("WiFi AP started: "));
+  Serial.print(WIFI_AP_SSID);
+  Serial.print(F(" pass="));
+  Serial.print(WIFI_AP_PASSWORD);
+  Serial.print(F(" ip="));
+  Serial.println(WiFi.softAPIP());
+}
+
 void WifiManager::begin(SettingsStore *settings) {
   settings_ = settings;
-  WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  ensureAp_();
   loadAndConnect_();
 }
 
@@ -35,7 +54,7 @@ void WifiManager::loadAndConnect_() {
   hasCreds_ = ssid[0] != '\0';
   copyString(ssid_, sizeof(ssid_), ssid);
   if (!hasCreds_) {
-    Serial.println(F("WiFi: no credentials (use 'wifi set <ssid> <pass>')."));
+    Serial.println(F("WiFi: no STA credentials (AP stays on)."));
     return;
   }
 
@@ -59,14 +78,17 @@ void WifiManager::tryConnect_() {
 
   Serial.print(F("WiFi STA connecting to "));
   Serial.println(ssid_);
-  WiFi.mode(WIFI_STA);
+  ensureAp_();
+  WiFi.mode(WIFI_AP_STA);
   WiFi.setSleep(false);
   WiFi.disconnect(false, false);
-  delay(100);
+  delay(50);
   WiFi.begin(ssid_, pass);
 }
 
 void WifiManager::tick(uint32_t nowMs) {
+  ensureAp_();
+
   if (!hasCreds_) {
     return;
   }
@@ -77,7 +99,6 @@ void WifiManager::tick(uint32_t nowMs) {
     return;
   }
 
-  // Still associating — do not restart begin() yet.
   if (st == WL_IDLE_STATUS || st == WL_SCAN_COMPLETED) {
     return;
   }
@@ -118,41 +139,55 @@ void WifiManager::clearCredentials() {
   }
   hasCreds_ = false;
   ssid_[0] = '\0';
-  WiFi.disconnect(true, true);
+  WiFi.disconnect(true, false);
+  ensureAp_();
   Serial.println(F("WiFi credentials cleared."));
 }
 
 void WifiManager::printStatus() const {
-  Serial.print(F("WiFi: "));
+  Serial.print(F("WiFi STA: "));
   if (!hasCreds_) {
-    Serial.println(F("no credentials"));
-    return;
+    Serial.print(F("no credentials"));
+  } else {
+    Serial.print(ssid_);
+    Serial.print(F(" status="));
+    switch (WiFi.status()) {
+      case WL_CONNECTED:
+        Serial.print(F("connected ip="));
+        Serial.print(WiFi.localIP());
+        break;
+      case WL_NO_SSID_AVAIL:
+        Serial.print(F("ssid_not_found"));
+        break;
+      case WL_CONNECT_FAILED:
+        Serial.print(F("connect_failed"));
+        break;
+      case WL_CONNECTION_LOST:
+        Serial.print(F("connection_lost"));
+        break;
+      case WL_DISCONNECTED:
+        Serial.print(F("disconnected"));
+        break;
+      default:
+        Serial.print(static_cast<int>(WiFi.status()));
+        break;
+    }
   }
-  Serial.print(ssid_);
-  Serial.print(F(" status="));
-  switch (WiFi.status()) {
-    case WL_CONNECTED:
-      Serial.print(F("connected ip="));
-      Serial.println(WiFi.localIP());
-      break;
-    case WL_NO_SSID_AVAIL:
-      Serial.println(F("ssid_not_found"));
-      break;
-    case WL_CONNECT_FAILED:
-      Serial.println(F("connect_failed"));
-      break;
-    case WL_CONNECTION_LOST:
-      Serial.println(F("connection_lost"));
-      break;
-    case WL_DISCONNECTED:
-      Serial.println(F("disconnected"));
-      break;
-    default:
-      Serial.println(static_cast<int>(WiFi.status()));
-      break;
+  Serial.println();
+  Serial.print(F("WiFi AP: "));
+  if (apActive_) {
+    Serial.print(WIFI_AP_SSID);
+    Serial.print(F(" ip="));
+    Serial.println(WiFi.softAPIP());
+  } else {
+    Serial.println(F("off"));
   }
 }
 
 IPAddress WifiManager::localIP() const {
   return WiFi.localIP();
+}
+
+IPAddress WifiManager::apIP() const {
+  return WiFi.softAPIP();
 }

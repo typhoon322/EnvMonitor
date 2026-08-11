@@ -21,3 +21,6 @@
 #define PIN_TFT_DC 4
 #define PIN_TFT_RST 5
 #define PIN_TFT_BL 3
+
+// View-cycle button (3-pin module: VCC/GND/OUT). OUT active-HIGH when pressed.
+#define PIN_VIEW_BTN 2

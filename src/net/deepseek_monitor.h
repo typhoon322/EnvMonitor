@@ -1,0 +1,50 @@
+#pragma once
+
+#include <Arduino.h>
+
+#include "deepseek/deepseek_types.h"
+
+class SettingsStore;
+class WifiManager;
+
+class DeepSeekMonitor {
+public:
+  void begin(SettingsStore *settings, WifiManager *wifi);
+  // activeView: only auto-poll when TFT is on DeepSeek view.
+  void tick(uint32_t nowMs, bool activeView);
+
+  void reloadConfig();
+  bool applyConfig(const DeepSeekConfig &cfg);
+  uint16_t intervalSec() const { return cfg_.intervalSec; }
+  bool setIntervalSec(uint16_t sec);
+  bool addKey(const char *name, const char *apiKey);
+  bool removeKey(const char *nameOrIndex);
+  void listKeys() const;
+  void requestRefresh();
+  void printStatus() const;
+
+  uint8_t keyCount() const { return cfg_.keyCount; }
+  const DeepSeekBalanceEntry *balanceAt(size_t index) const;
+  size_t balanceCount() const { return cfg_.keyCount; }
+  bool isRefreshing() const { return refreshing_; }
+  uint32_t lastRefreshMs() const { return lastRefreshMs_; }
+  bool hasCachedBalances() const { return hasCached_; }
+
+private:
+  bool fetchOne_(size_t index);
+  void markError_(size_t index, const char *message);
+  void resetEntry_(size_t index, const char *name);
+  void persistBalances_();
+  void restoreBalances_();
+  void refreshAll_();
+
+  SettingsStore *settings_ = nullptr;
+  WifiManager *wifi_ = nullptr;
+  DeepSeekConfig cfg_{};
+  DeepSeekBalanceEntry balances_[DEEPSEEK_MAX_KEYS] = {};
+  uint32_t lastRefreshMs_ = 0;
+  bool forceRefresh_ = false;
+  bool refreshing_ = false;
+  bool hasCached_ = false;
+  bool wasActiveView_ = false;
+};
