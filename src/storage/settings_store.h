@@ -34,6 +34,8 @@ public:
 
   void loadDeepSeekBalances(DeepSeekBalanceEntry *entries, uint8_t maxCount) const;
   bool saveDeepSeekBalances(const DeepSeekBalanceEntry *entries, uint8_t count);
+  uint32_t loadDeepSeekRefreshEpoch() const;
+  bool saveDeepSeekRefreshEpoch(uint32_t epoch);
 
 private:
   static constexpr uint32_t kMagicV1 = 0x454E5631;  // "ENV1"

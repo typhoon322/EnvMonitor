@@ -287,3 +287,18 @@ bool SettingsStore::saveDeepSeekBalances(const DeepSeekBalanceEntry *entries, ui
   }
   return true;
 }
+
+uint32_t SettingsStore::loadDeepSeekRefreshEpoch() const {
+  if (!opened_) {
+    return 0;
+  }
+  return prefs.getUInt("dsEpoch", 0);
+}
+
+bool SettingsStore::saveDeepSeekRefreshEpoch(uint32_t epoch) {
+  if (!opened_) {
+    return false;
+  }
+  prefs.putUInt("dsEpoch", epoch);
+  return true;
+}

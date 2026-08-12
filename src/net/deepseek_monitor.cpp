@@ -9,6 +9,8 @@
 #include "net/wifi_manager.h"
 #include "storage/settings_store.h"
 
+#include <time.h>
+
 namespace {
 void copyString(char *dest, size_t destLen, const char *src) {
   if (dest == nullptr || destLen == 0) {
@@ -32,8 +34,12 @@ void DeepSeekMonitor::markError_(size_t index, const char *message) {
   if (index >= DEEPSEEK_MAX_KEYS) {
     return;
   }
-  balances_[index].valid = false;
+  // Soft-fail: never clear a previously successful balance (UI keeps last good value).
   copyString(balances_[index].error, sizeof(balances_[index].error), message);
+  Serial.print(F("[deepseek] "));
+  Serial.print(balances_[index].name);
+  Serial.print(F(": "));
+  Serial.println(message != nullptr ? message : "error");
 }
 
 void DeepSeekMonitor::persistBalances_() {
@@ -85,6 +91,11 @@ void DeepSeekMonitor::reloadConfig() {
     balances_[i] = DeepSeekBalanceEntry{};
   }
   restoreBalances_();
+  if (settings_ != nullptr) {
+    lastRefreshEpoch_ = settings_->loadDeepSeekRefreshEpoch();
+  } else {
+    lastRefreshEpoch_ = 0;
+  }
 
   lastRefreshMs_ = 0;
   forceRefresh_ = false;
@@ -224,10 +235,12 @@ bool DeepSeekMonitor::fetchOne_(size_t index) {
 
   WiFiClientSecure client;
   client.setInsecure();
-  client.setTimeout(15);
+  // Seconds. Keep well under task WDT (20s) so one blocked GET cannot reboot.
+  client.setTimeout(kHttpTimeoutMs / 1000U);
 
   HTTPClient http;
-  http.setTimeout(15000);
+  http.setTimeout(kHttpTimeoutMs);
+  esp_task_wdt_reset();
   if (!http.begin(client, DEEPSEEK_BALANCE_URL)) {
     markError_(index, "HTTP init failed");
     return false;
@@ -252,6 +265,7 @@ bool DeepSeekMonitor::fetchOne_(size_t index) {
 
   const String payload = http.getString();
   http.end();
+  esp_task_wdt_reset();
 
   JsonDocument doc;
   const DeserializationError err = deserializeJson(doc, payload);
@@ -284,38 +298,91 @@ bool DeepSeekMonitor::fetchOne_(size_t index) {
   return true;
 }
 
-void DeepSeekMonitor::refreshAll_() {
-  if (cfg_.keyCount == 0 || refreshing_) {
+void DeepSeekMonitor::startRefresh_() {
+  if (cfg_.keyCount == 0 || refreshing_ || spoutHold_) {
     return;
   }
   if (wifi_ == nullptr || !wifi_->isConnected()) {
     Serial.println(F("[deepseek] Skip refresh: WiFi down"));
+    forceRefresh_ = false;
+    spoutHold_ = false;
     return;
   }
 
   refreshing_ = true;
+  refreshAnyOk_ = false;
+  refreshIndex_ = 0;
   forceRefresh_ = false;
   Serial.println(F("[deepseek] Refreshing balances..."));
+}
 
-  bool anyOk = false;
-  for (uint8_t i = 0; i < cfg_.keyCount; ++i) {
-    if (fetchOne_(i)) {
-      anyOk = true;
+void DeepSeekMonitor::beginSpoutThenRefresh_() {
+  if (cfg_.keyCount == 0 || refreshing_ || spoutHold_) {
+    return;
+  }
+  if (wifi_ == nullptr || !wifi_->isConnected()) {
+    Serial.println(F("[deepseek] Skip refresh: WiFi down"));
+    forceRefresh_ = false;
+    return;
+  }
+  // Let the UI animate a big spout before the blocking HTTPS call.
+  spoutHold_ = true;
+  spoutHoldUntilMs_ = millis() + kSpoutHoldMs;
+  forceRefresh_ = false;
+  Serial.println(F("[deepseek] Spout, then refresh..."));
+}
+
+void DeepSeekMonitor::finishRefresh_() {
+  // Advance interval timer even on failure so countdown/whale keep moving.
+  lastRefreshMs_ = millis();
+  if (refreshAnyOk_) {
+    const time_t now = time(nullptr);
+    if (now > 1700000000) {
+      lastRefreshEpoch_ = static_cast<uint32_t>(now);
     }
     esp_task_wdt_reset();
-  }
-
-  lastRefreshMs_ = millis();
-  if (anyOk) {
     persistBalances_();
+    esp_task_wdt_reset();
+    if (settings_ != nullptr && lastRefreshEpoch_ > 0) {
+      settings_->saveDeepSeekRefreshEpoch(lastRefreshEpoch_);
+    }
+  } else {
+    Serial.println(F("[deepseek] Refresh failed; keep last balance / time"));
   }
   refreshing_ = false;
+  refreshIndex_ = 0;
   Serial.println(F("[deepseek] Refresh complete."));
 }
 
 void DeepSeekMonitor::tick(uint32_t nowMs, bool activeView) {
+  // Spout celebration window: loop keeps running so TFT can animate.
+  if (spoutHold_) {
+    if (static_cast<int32_t>(nowMs - spoutHoldUntilMs_) >= 0) {
+      spoutHold_ = false;
+      startRefresh_();
+    }
+    wasActiveView_ = activeView;
+    return;
+  }
+
+  // One key per tick so loop() can feed WDT / refresh TFT between HTTPS calls.
+  if (refreshing_) {
+    if (refreshIndex_ < cfg_.keyCount) {
+      if (fetchOne_(refreshIndex_)) {
+        refreshAnyOk_ = true;
+      }
+      refreshIndex_++;
+      esp_task_wdt_reset();
+    }
+    if (refreshIndex_ >= cfg_.keyCount) {
+      finishRefresh_();
+    }
+    wasActiveView_ = activeView;
+    return;
+  }
+
   if (forceRefresh_) {
-    refreshAll_();
+    beginSpoutThenRefresh_();
     wasActiveView_ = activeView;
     return;
   }
@@ -336,8 +403,15 @@ void DeepSeekMonitor::tick(uint32_t nowMs, bool activeView) {
   const uint32_t intervalMs = static_cast<uint32_t>(cfg_.intervalSec) * 1000UL;
   const bool due =
       enteredView || lastRefreshMs_ == 0 || nowMs - lastRefreshMs_ >= intervalMs;
-  if (due) {
-    refreshAll_();
+  if (!due) {
+    return;
+  }
+
+  // First fetch / enter view: skip spout delay and pull immediately.
+  if (enteredView || lastRefreshMs_ == 0) {
+    startRefresh_();
+  } else {
+    beginSpoutThenRefresh_();
   }
 }
 

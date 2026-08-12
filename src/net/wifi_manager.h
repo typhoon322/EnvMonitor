@@ -21,15 +21,19 @@ public:
   IPAddress apIP() const;
   const char *staSsid() const { return ssid_; }
   const char *apSsid() const { return WIFI_AP_SSID; }
+  bool isTimeSynced() const { return timeSynced_; }
 
 private:
   void loadAndConnect_();
   void tryConnect_();
   void ensureAp_();
+  void ensureNtp_();
 
   SettingsStore *settings_ = nullptr;
   bool hasCreds_ = false;
   bool apActive_ = false;
+  bool timeSynced_ = false;
+  bool ntpStarted_ = false;
   char ssid_[33] = "";
   uint32_t nextRetryMs_ = 0;
   uint32_t backoffMs_ = WIFI_RECONNECT_MIN_MS;

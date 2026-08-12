@@ -160,7 +160,8 @@ void refreshDisplay() {
       }
     }
     displayDriver.updateDeepSeek(entries, count, wifiManager.isConnected(),
-                                 deepSeekMonitor.isRefreshing(), deepSeekMonitor.lastRefreshMs(),
+                                 deepSeekMonitor.isRefreshing(), deepSeekMonitor.isSpouting(),
+                                 deepSeekMonitor.lastRefreshEpoch(), deepSeekMonitor.lastRefreshMs(),
                                  deepSeekMonitor.intervalSec());
   } else {
     displayDriver.updateStatus(currentReading, airQualitySensor.stateText());
@@ -272,7 +273,13 @@ void loop() {
     }
   }
 
-  if (now - lastDisplayMs >= DISPLAY_INTERVAL_MS) {
+  if (now - lastDisplayMs >=
+      (displayView == DisplayView::DeepSeek
+           ? ((displayDriver.isDeepSeekAnimating() || displayDriver.isDeepSeekSpouting() ||
+               deepSeekMonitor.isSpouting())
+                  ? DISPLAY_ANIM_INTERVAL_MS
+                  : DISPLAY_DS_INTERVAL_MS)
+           : DISPLAY_INTERVAL_MS)) {
     lastDisplayMs = now;
     refreshDisplay();
   }

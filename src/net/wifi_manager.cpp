@@ -1,6 +1,7 @@
 #include "net/wifi_manager.h"
 
 #include <WiFi.h>
+#include <time.h>
 
 #include "config.h"
 #include "storage/settings_store.h"
@@ -32,6 +33,28 @@ void WifiManager::ensureAp_() {
   Serial.print(WIFI_AP_PASSWORD);
   Serial.print(F(" ip="));
   Serial.println(WiFi.softAPIP());
+}
+
+void WifiManager::ensureNtp_() {
+  if (!isConnected()) {
+    return;
+  }
+  if (!ntpStarted_) {
+    configTime(NTP_GMT_OFFSET_SEC, NTP_DAYLIGHT_OFFSET_SEC, NTP_SERVER_PRIMARY,
+               NTP_SERVER_SECONDARY);
+    ntpStarted_ = true;
+    Serial.println(F("NTP sync started (UTC+8)."));
+  }
+  if (timeSynced_) {
+    return;
+  }
+  time_t now = time(nullptr);
+  if (now > 1700000000) {  // roughly after 2023
+    timeSynced_ = true;
+    struct tm tmInfo;
+    localtime_r(&now, &tmInfo);
+    Serial.printf("NTP OK: %02d:%02d:%02d\n", tmInfo.tm_hour, tmInfo.tm_min, tmInfo.tm_sec);
+  }
 }
 
 void WifiManager::begin(SettingsStore *settings) {
@@ -96,8 +119,11 @@ void WifiManager::tick(uint32_t nowMs) {
   const wl_status_t st = WiFi.status();
   if (st == WL_CONNECTED) {
     backoffMs_ = WIFI_RECONNECT_MIN_MS;
+    ensureNtp_();
     return;
   }
+
+  timeSynced_ = false;
 
   if (st == WL_IDLE_STATUS || st == WL_SCAN_COMPLETED) {
     return;
