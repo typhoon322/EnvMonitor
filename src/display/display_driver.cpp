@@ -350,6 +350,8 @@ void DisplayDriver::resetDeepSeekCache_() {
   dsEpoch_ = 0;
   dsRemainSec_ = -2;
   dsWhaleX_ = -1;
+  dsSpoutLeft_ = -1;
+  dsSpoutW_ = 0;
   dsWhaleRight_ = true;
   dsWhaleSpout_ = false;
   dsSpouting_ = false;
@@ -366,7 +368,20 @@ void DisplayDriver::clearBalanceBand_() {
   clearField(4, 48, 312, 58);
 }
 
+void DisplayDriver::clearSpoutResidue_() {
+  // Full plume column including where it overlapped the balance digits.
+  if (dsSpoutLeft_ >= 0 && dsSpoutW_ > 0) {
+    clearField(dsSpoutLeft_, 18, dsSpoutW_, kDsWhaleY - 18);
+  } else {
+    clearField(120, 18, 80, kDsWhaleY - 18);
+  }
+  dsSpoutLeft_ = -1;
+  dsSpoutW_ = 0;
+  clearBalanceBand_();
+}
+
 void DisplayDriver::drawStaticBalance_(const char *balance, uint16_t color) {
+  tft.resetViewport();
   clearBalanceBand_();
   tft.setTextFont(kDsBalFont);
   tft.setTextSize(1);
@@ -383,6 +398,17 @@ void DisplayDriver::startBalanceAnim_(const char *from, const char *to, uint16_t
   dsAnimFrom_[sizeof(dsAnimFrom_) - 1] = '\0';
   strncpy(dsAnimTo_, to != nullptr ? to : "", sizeof(dsAnimTo_) - 1);
   dsAnimTo_[sizeof(dsAnimTo_) - 1] = '\0';
+  // Empty / identical → no roll, just show the final value.
+  if (dsAnimTo_[0] == '\0' || strcmp(dsAnimFrom_, dsAnimTo_) == 0) {
+    dsAnimating_ = false;
+    drawStaticBalance_(dsAnimTo_, color);
+    return;
+  }
+  if (dsAnimFrom_[0] == '\0') {
+    dsAnimating_ = false;
+    drawStaticBalance_(dsAnimTo_, color);
+    return;
+  }
   dsAnimColor_ = color;
   dsAnimUp_ = atof(dsAnimTo_) >= atof(dsAnimFrom_);
   dsAnimStartMs_ = millis();
@@ -396,76 +422,25 @@ void DisplayDriver::drawRollingBalance_(float t) {
   if (t > 1.0f) {
     t = 1.0f;
   }
+  // Ease out; always render a FULL number string (no viewport clipping).
   const float u = 1.0f - t;
   const float e = 1.0f - u * u * u;
 
+  const float from = atof(dsAnimFrom_);
+  const float to = atof(dsAnimTo_);
+  const float v = from + (to - from) * e;
+
+  // Preserve 2 decimal places like DeepSeek balance strings.
+  char buf[DEEPSEEK_BALANCE_LEN];
+  snprintf(buf, sizeof(buf), "%.2f", static_cast<double>(v));
+
+  tft.resetViewport();
+  clearBalanceBand_();
   tft.setTextFont(kDsBalFont);
   tft.setTextSize(1);
-  tft.setTextDatum(TL_DATUM);
-  const int cellH = tft.fontHeight();
-  const int cellW = tft.textWidth("0") + 1;
-
-  char fromPad[DEEPSEEK_BALANCE_LEN];
-  char toPad[DEEPSEEK_BALANCE_LEN];
-  const size_t fromLen = strlen(dsAnimFrom_);
-  const size_t toLen = strlen(dsAnimTo_);
-  const size_t width = fromLen > toLen ? fromLen : toLen;
-  if (width == 0 || width >= DEEPSEEK_BALANCE_LEN) {
-    drawStaticBalance_(dsAnimTo_, dsAnimColor_);
-    return;
-  }
-  memset(fromPad, ' ', width);
-  memset(toPad, ' ', width);
-  fromPad[width] = '\0';
-  toPad[width] = '\0';
-  memcpy(fromPad + (width - fromLen), dsAnimFrom_, fromLen);
-  memcpy(toPad + (width - toLen), dsAnimTo_, toLen);
-
-  const int totalW = static_cast<int>(width) * cellW;
-  int baseX = kDsBalCx - totalW / 2;
-  if (baseX < 4) {
-    baseX = 4;
-  }
-  const int baseY = kDsBalCy - cellH / 2;
-  clearBalanceBand_();
-
-  for (size_t i = 0; i < width; ++i) {
-    const char a = fromPad[i];
-    const char b = toPad[i];
-    const int x = baseX + static_cast<int>(i) * cellW;
-    if (a == b) {
-      tft.setTextColor(dsAnimColor_, kBg);
-      char s[2] = {a == ' ' ? '\0' : a, '\0'};
-      if (s[0] != '\0') {
-        tft.drawString(s, x, baseY);
-      }
-      continue;
-    }
-
-    tft.setViewport(x, baseY, cellW, cellH, false);
-    tft.fillScreen(kBg);
-    tft.setTextColor(dsAnimColor_, kBg);
-    const int offset = static_cast<int>(e * cellH + 0.5f);
-    char sa[2] = {a == ' ' ? '\0' : a, '\0'};
-    char sb[2] = {b == ' ' ? '\0' : b, '\0'};
-    if (dsAnimUp_) {
-      if (sa[0] != '\0') {
-        tft.drawString(sa, 0, -offset);
-      }
-      if (sb[0] != '\0') {
-        tft.drawString(sb, 0, cellH - offset);
-      }
-    } else {
-      if (sa[0] != '\0') {
-        tft.drawString(sa, 0, offset);
-      }
-      if (sb[0] != '\0') {
-        tft.drawString(sb, 0, offset - cellH);
-      }
-    }
-    tft.resetViewport();
-  }
-
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(dsAnimColor_, kBg);
+  tft.drawString(buf, kDsBalCx, kDsBalCy);
   tft.setTextFont(1);
   tft.setTextSize(1);
   tft.setTextDatum(TL_DATUM);
@@ -593,16 +568,8 @@ void DisplayDriver::drawWhaleSprite_(int x, int y, bool facingRight, bool spout,
   // Official DeepSeek whale mark (1-bit), brand blue #4D6BFE.
   const uint16_t blue = color565(0x4D, 0x6B, 0xFE);
   const uint8_t *bmp = facingRight ? kDsWhaleBmpRight : kDsWhaleBmpLeft;
-
-  for (int row = 0; row < kDsWhaleBmpH; ++row) {
-    const int rowBase = row * kDsWhaleBmpStride;
-    for (int col = 0; col < kDsWhaleBmpW; ++col) {
-      const uint8_t byte = pgm_read_byte(&bmp[rowBase + (col >> 3)]);
-      if ((byte >> (7 - (col & 7))) & 0x01) {
-        tft.drawPixel(x + col, y + row, blue);
-      }
-    }
-  }
+  // Two-color bitmap: fill bg+fg in one pass to avoid blank-flash.
+  tft.drawBitmap(x, y, bmp, kDsWhaleBmpW, kDsWhaleBmpH, blue, kBg);
 
   if (spout) {
     const int bx = facingRight ? x + 30 : x + 22;
@@ -621,25 +588,21 @@ void DisplayDriver::drawWhaleLane_(uint32_t lastRefreshMs, uint16_t intervalSec,
     }
   }
 
-  // Celebrate only during explicit spout-hold / post-refresh — do NOT freeze early at 98%.
   if (celebrate && !dsSpouting_) {
     dsSpoutUntilMs_ = millis() + 2000UL;
   }
-  if (!celebrate && dsSpouting_ && millis() > dsSpoutUntilMs_) {
-    // end
-  }
 
   const bool spout = celebrate || (millis() < dsSpoutUntilMs_);
-  const uint8_t spoutFrame = static_cast<uint8_t>((millis() / 70UL) % 5UL);
+  const uint8_t spoutFrame = static_cast<uint8_t>((millis() / 90UL) % 5UL);
 
   float frac = whalePathX_(progress);
   if (celebrate) {
-    frac = 0.5f;  // center only while celebrating
+    frac = 0.5f;
   }
 
   const int minX = kDsLanePad;
   const int maxX = kScreenW - kDsWhaleW - kDsLanePad;
-  const int x = minX + static_cast<int>(frac * static_cast<float>(maxX - minX) + 0.5f);
+  int x = minX + static_cast<int>(frac * static_cast<float>(maxX - minX) + 0.5f);
 
   bool facingRight = true;
   if (progress < 0.25f) {
@@ -653,27 +616,60 @@ void DisplayDriver::drawWhaleLane_(uint32_t lastRefreshMs, uint16_t intervalSec,
     facingRight = dsWhaleRight_;
   }
 
+  // Quantize motion: ignore 1px jitter to cut SPI redraw flicker.
+  if (!spout && !celebrate && dsWhaleX_ >= 0) {
+    const int dx = x - dsWhaleX_;
+    if (dx > -2 && dx < 2 && facingRight == dsWhaleRight_) {
+      dsSpouting_ = false;
+      return;
+    }
+  }
+
+  const bool wasSpout = dsSpouting_;
   dsSpouting_ = spout;
   if (dsWhaleX_ == x && dsWhaleRight_ == facingRight && dsWhaleSpout_ == spout &&
       (!spout || dsSpoutFrame_ == spoutFrame)) {
     return;
   }
 
-  // Clear whale lane; when spouting also clear a tall plume column (may cover balance).
-  clearField(0, kDsWhaleY - 4, kScreenW, kDsWhaleH + 8);
+  const int oldX = dsWhaleX_;
+
+  // Draw new frame first, then erase only the uncovered gap (no full-lane blank).
+  // Spout erase stays ABOVE the balance band to avoid blanking the amount each frame.
+  constexpr int kSpoutClearBottom = 50;
+  if (wasSpout && dsSpoutLeft_ >= 0 && dsSpoutW_ > 0) {
+    clearField(dsSpoutLeft_, 18, dsSpoutW_, kSpoutClearBottom - 18);
+  }
   if (spout) {
-    const int bx = (facingRight ? x + 30 : x + 22);
-    int left = bx - 28;
+    const int bx = facingRight ? x + 30 : x + 22;
+    int left = bx - 30;
     if (left < 0) {
       left = 0;
     }
-    int width = 56;
+    int width = 60;
     if (left + width > kScreenW) {
       width = kScreenW - left;
     }
-    clearField(left, 18, width, kDsWhaleY - 18);
+    clearField(left, 18, width, kSpoutClearBottom - 18);
+    dsSpoutLeft_ = static_cast<int16_t>(left);
+    dsSpoutW_ = static_cast<int16_t>(width);
+  } else if (wasSpout) {
+    dsSpoutLeft_ = -1;
+    dsSpoutW_ = 0;
   }
+
   drawWhaleSprite_(x, kDsWhaleY, facingRight, spout, spoutFrame);
+
+  if (oldX >= 0 && oldX != x) {
+    if (x > oldX) {
+      const int gap = x - oldX;
+      clearField(oldX, kDsWhaleY, gap > kDsWhaleW ? kDsWhaleW : gap, kDsWhaleH);
+    } else {
+      const int gap = oldX - x;
+      clearField(x + kDsWhaleW, kDsWhaleY, gap > kDsWhaleW ? kDsWhaleW : gap, kDsWhaleH);
+    }
+  }
+
   dsWhaleX_ = static_cast<int16_t>(x);
   dsWhaleRight_ = facingRight;
   dsWhaleSpout_ = spout;
@@ -735,8 +731,11 @@ void DisplayDriver::updateDeepSeek(const DeepSeekBalanceEntry *entries, size_t c
   }
 
   const bool wifiChanged = !dsCacheValid_ || dsWifi_ != wifiConnected;
+  // While rolling toward `balance`, do not report balanceChanged (prevents restart flicker).
   const bool balanceChanged =
-      dsCacheValid_ && dsValid_ && valid && strncmp(dsBalance_, balance, sizeof(dsBalance_)) != 0;
+      dsCacheValid_ && dsValid_ && valid &&
+      strncmp(dsBalance_, balance, sizeof(dsBalance_)) != 0 &&
+      !(dsAnimating_ && strncmp(dsAnimTo_, balance, sizeof(dsAnimTo_)) == 0);
   const bool metaChanged =
       !dsCacheValid_ || dsHasKey_ != hasKey || dsValid_ != valid || dsAvailable_ != available ||
       dsLowBalance_ != lowBalance || dsKeyCount_ != static_cast<uint8_t>(count) ||
@@ -762,22 +761,26 @@ void DisplayDriver::updateDeepSeek(const DeepSeekBalanceEntry *entries, size_t c
     const bool celebrate = spouting || refreshing;
     const bool wasCelebrating = dsSpouting_;
     drawWhaleLane_(lastRefreshMs, intervalSec, celebrate);
-    // Plume may have covered the balance — restore when celebration ends.
     if (wasCelebrating && !dsSpouting_ && valid) {
-      drawStaticBalance_(balance, balColor);
+      clearSpoutResidue_();
       drawDeepSeekMeta_(lowBalance, lastRefreshEpoch, count);
       drawCountdownText_(remainSec);
+      // Don't wipe/restart an in-progress roll.
+      if (!dsAnimating_) {
+        drawStaticBalance_(dsBalance_[0] != '\0' ? dsBalance_ : balance, balColor);
+      }
     }
   }
 
-  if (dsAnimating_ && !metaChanged && !wifiChanged && !balanceChanged) {
+  // Keep rolling; never fall through to startBalanceAnim_ again.
+  if (dsAnimating_) {
     tft.setTextFont(1);
     tft.setTextSize(1);
     dsRefreshing_ = refreshing;
     return;
   }
 
-  if (!bodyChanged && !dsAnimating_) {
+  if (!bodyChanged) {
     tft.setTextFont(1);
     tft.setTextSize(1);
     dsRefreshing_ = refreshing;
@@ -821,7 +824,9 @@ void DisplayDriver::updateDeepSeek(const DeepSeekBalanceEntry *entries, size_t c
     }
   } else if (balanceChanged && valid) {
     startBalanceAnim_(dsBalance_, balance, balColor);
-    drawRollingBalance_(0.0f);
+    if (dsAnimating_) {
+      drawRollingBalance_(0.0f);
+    }
     if (metaChanged) {
       drawDeepSeekMeta_(lowBalance, lastRefreshEpoch, count);
     }
@@ -843,6 +848,9 @@ void DisplayDriver::updateDeepSeek(const DeepSeekBalanceEntry *entries, size_t c
   dsIntervalSec_ = intervalSec;
   dsEpoch_ = lastRefreshEpoch;
   dsRemainSec_ = static_cast<int16_t>(remainSec);
-  strncpy(dsBalance_, balance, sizeof(dsBalance_) - 1);
-  dsBalance_[sizeof(dsBalance_) - 1] = '\0';
+  // Keep from-value stable while the odometer is rolling.
+  if (!dsAnimating_) {
+    strncpy(dsBalance_, balance, sizeof(dsBalance_) - 1);
+    dsBalance_[sizeof(dsBalance_) - 1] = '\0';
+  }
 }

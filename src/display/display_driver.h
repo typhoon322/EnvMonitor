@@ -46,6 +46,8 @@ private:
   uint32_t dsEpoch_ = 0;
   int16_t dsRemainSec_ = -2;
   int16_t dsWhaleX_ = -1;
+  int16_t dsSpoutLeft_ = -1;
+  int16_t dsSpoutW_ = 0;
   bool dsWhaleRight_ = true;
   bool dsWhaleSpout_ = false;
   bool dsSpouting_ = false;
@@ -68,6 +70,7 @@ private:
   void drawRollingBalance_(float t);
   void drawStaticBalance_(const char *balance, uint16_t color);
   void clearBalanceBand_();
+  void clearSpoutResidue_();
   void drawDeepSeekMeta_(bool lowBalance, uint32_t lastRefreshEpoch, size_t count);
   void drawCountdownText_(int remainSec);
   void drawWhaleLane_(uint32_t lastRefreshMs, uint16_t intervalSec, bool celebrate);
